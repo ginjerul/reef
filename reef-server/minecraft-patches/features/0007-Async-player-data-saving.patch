@@ -1,0 +1,118 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Sat, 24 Oct 2026 19:00:00 +0300
+Subject: [PATCH] Async player data saving
+
+Inspired by Nitori's / Leaf's "Async playerdata saving".
+
+Player data is still collected on the main thread (it has to be), but
+compressing it and writing the .dat file now happen on a single
+background thread ("Reef Player Data Saving"). This removes the disk
+write from the main thread on autosave and when players quit, which
+matters with many players online.
+
+Safety:
+- Saves run one at a time, in order, on one thread.
+- Writes still go to a temp file that atomically replaces the old one.
+- Loading a player's data first waits for any save of that player that
+  is still in progress, so a quick quit-and-rejoin never loads old data.
+- On shutdown, all pending saves are finished before worlds are saved.
+  Saves requested after that run synchronously.
+
+Toggle with optimizations.async-player-data-saving in reef.yml.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index ca2caace6aab0dfcb0ab7a0fd28e66555c62fdc5..cf645159d431fc93e60f8167267be00b11cb7501 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1028,6 +1028,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             LOGGER.info("Saving players");
+             this.playerList.saveAll();
+             this.playerList.removeAll(this.isRestarting); // Paper
++            dev.reef.Reef.flushPlayerData(); // Reef - async player data saving - finish writing before shutdown continues
+             try { Thread.sleep(100); } catch (InterruptedException ex) {} // CraftBukkit - SPIGOT-625 - give server at least a chance to send packets
+         }
+ 
+diff --git a/net/minecraft/world/level/storage/PlayerDataStorage.java b/net/minecraft/world/level/storage/PlayerDataStorage.java
+index b8ef50bc3d07890c9da2c98d5f009a3adc52f4b0..d5e715ce0e50f814e90d4630682c302146c14afc 100644
+--- a/net/minecraft/world/level/storage/PlayerDataStorage.java
++++ b/net/minecraft/world/level/storage/PlayerDataStorage.java
+@@ -35,18 +35,64 @@ public class PlayerDataStorage {
+         try (ProblemReporter.ScopedCollector scopedCollector = new ProblemReporter.ScopedCollector(player.problemPath(), LOGGER)) {
+             TagValueOutput tagValueOutput = TagValueOutput.createWithContext(scopedCollector, player.registryAccess());
+             player.saveWithoutId(tagValueOutput);
+-            Path path = this.playerDir.toPath();
+-            Path path1 = Files.createTempFile(path, player.getStringUUID() + "-", ".dat");
+             CompoundTag compoundTag = tagValueOutput.buildResult();
+-            NbtIo.writeCompressed(compoundTag, path1);
+-            Path path2 = path.resolve(player.getStringUUID() + ".dat");
+-            Path path3 = path.resolve(player.getStringUUID() + ".dat_old");
+-            Util.safeReplaceFile(path2, path1, path3);
++            // Reef start - async player data saving
++            // The tag is a fresh copy owned by this save, so compressing and writing it can happen on another thread.
++            final java.util.UUID uuid = player.getUUID();
++            final String stringUuid = player.getStringUUID();
++            final String name = player.getPlainTextName();
++            if (dev.reef.Reef.asyncPlayerDataSaving()) {
++                try {
++                    final java.util.concurrent.CompletableFuture<Void> future = java.util.concurrent.CompletableFuture.runAsync(
++                        () -> this.writePlayerData(stringUuid, name, compoundTag), dev.reef.Reef.PLAYER_DATA_EXECUTOR
++                    );
++                    this.pendingSaves.put(uuid, future);
++                    future.whenComplete((ignored, throwable) -> this.pendingSaves.remove(uuid, future));
++                    return;
++                } catch (final java.util.concurrent.RejectedExecutionException ignored) {
++                    // executor already shut down (server stopping): fall through and save synchronously
++                }
++            }
++            this.writePlayerData(stringUuid, name, compoundTag);
++            // Reef end - async player data saving
+         } catch (Exception var11) {
+             LOGGER.warn("Failed to save player data for {}", player.getPlainTextName(), var11); // Paper - Print exception
+         }
+     }
+ 
++    // Reef start - async player data saving
++    // Latest pending save per player; saves run in order on a single thread.
++    private final java.util.concurrent.ConcurrentHashMap<java.util.UUID, java.util.concurrent.CompletableFuture<Void>> pendingSaves = new java.util.concurrent.ConcurrentHashMap<>();
++
++    private void writePlayerData(final String stringUuid, final String name, final CompoundTag compoundTag) {
++        try {
++            Path path = this.playerDir.toPath();
++            Path path1 = Files.createTempFile(path, stringUuid + "-", ".dat");
++            NbtIo.writeCompressed(compoundTag, path1);
++            Path path2 = path.resolve(stringUuid + ".dat");
++            Path path3 = path.resolve(stringUuid + ".dat_old");
++            Util.safeReplaceFile(path2, path1, path3);
++        } catch (Exception exception) {
++            LOGGER.warn("Failed to save player data for {}", name, exception);
++        }
++    }
++
++    // A player who quits and rejoins quickly must load the data that is still being written.
++    private void waitForPendingSave(final java.util.UUID uuid, final String name) {
++        final java.util.concurrent.CompletableFuture<Void> future = this.pendingSaves.get(uuid);
++        if (future == null) {
++            return;
++        }
++        try {
++            future.get(10L, java.util.concurrent.TimeUnit.SECONDS);
++        } catch (final InterruptedException exception) {
++            Thread.currentThread().interrupt();
++        } catch (final Exception exception) {
++            LOGGER.warn("Timed out waiting for the previous player data save of {}", name, exception);
++        }
++    }
++    // Reef end - async player data saving
++
+     private void backup(NameAndId nameAndId, String suffix) {
+         Path path = this.playerDir.toPath();
+         String string = nameAndId.id().toString();
+@@ -62,6 +108,7 @@ public class PlayerDataStorage {
+     }
+ 
+     private Optional<CompoundTag> load(NameAndId nameAndId, String suffix) {
++        this.waitForPendingSave(nameAndId.id(), nameAndId.name()); // Reef - async player data saving
+         File file = new File(this.playerDir, nameAndId.id() + suffix);
+         // Spigot start
+         boolean usingWrongFile = false;

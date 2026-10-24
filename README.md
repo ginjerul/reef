@@ -9,6 +9,11 @@ Reef aims to stay fully compatible with Paper plugins. Optimizations that change
 | Patch | Origin | Config (`reef.yml`) | Default |
 |---|---|---|---|
 | Optimize suffocation checks | Pufferfish | `optimizations.check-stuck-in-wall-interval` | `10` (vanilla = `1`) |
+| Dynamic Activation of Brain (DAB) | Pufferfish / Airplane | `optimizations.dynamic-activation-of-brain` | on, villagers & a few others blacklisted |
+| Async mob spawn counting | Pufferfish | `optimizations.async-mob-spawning` | `true` |
+| Slower idle animal AI checks (tempt / follow parent) | Reef (idea from Leaf) | `optimizations.goal-check-interval` | `10` / `20` ticks (vanilla = `2`) |
+| Only players push mobs | Leaf | `optimizations.only-players-push-entities` | `false` |
+| Async player data saving | Reef (idea from Nitori / Leaf) | `optimizations.async-player-data-saving` | `true` |
 
 ## Building
 

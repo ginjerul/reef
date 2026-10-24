@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Sat, 24 Oct 2026 18:45:00 +0300
+Subject: [PATCH] Configurable goal check intervals
+
+Inspired by Leaf's "configurable goal update interval" (alternative to
+Pufferfish's "Throttle goal selector during inactive ticking").
+
+Farm animals (cows, sheep, pigs, chickens, ...) run two relatively
+expensive checks while idle:
+
+- TemptGoal scans all players in the world for one holding their food.
+- FollowParentGoal (babies only) searches a 17x9x17 box for adults of
+  the same type, which gets expensive in crowded breeding pens.
+
+Mobs normally re-run these checks every 2 ticks. This adds
+optimizations.goal-check-interval.temptation and .follow-parent to
+reef.yml (in ticks, 2 = vanilla) and staggers the checks randomly
+between mobs so they don't all run on the same tick.
+
+Changes vanilla behaviour slightly: animals can take up to the
+configured interval to notice a player holding food, or to start
+following a parent.
+
+diff --git a/net/minecraft/world/entity/ai/goal/FollowParentGoal.java b/net/minecraft/world/entity/ai/goal/FollowParentGoal.java
+index 3b158592d97f5ee2ad10b1da75101cb1669871a3..be62f04bf9c0541fda53e18f8f2e8eb563ac15a8 100644
+--- a/net/minecraft/world/entity/ai/goal/FollowParentGoal.java
++++ b/net/minecraft/world/entity/ai/goal/FollowParentGoal.java
+@@ -18,11 +18,26 @@ public class FollowParentGoal extends Goal {
+         this.speedModifier = speedModifier;
+     }
+ 
++    private int reefCheckCooldown = -1; // Reef - configurable goal check intervals
++
+     @Override
+     public boolean canUse() {
+         if (this.animal.getAge() >= 0) {
+             return false;
+         } else {
++            // Reef start - configurable goal check intervals
++            final int checkCalls = dev.reef.ReefConfig.goalCheckCalls(dev.reef.ReefConfig.followParentCheckInterval);
++            if (checkCalls > 1) {
++                if (this.reefCheckCooldown < 0) {
++                    this.reefCheckCooldown = this.animal.getRandom().nextInt(checkCalls); // spread checks out between mobs
++                }
++                if (this.reefCheckCooldown > 0) {
++                    this.reefCheckCooldown--;
++                    return false;
++                }
++                this.reefCheckCooldown = checkCalls - 1;
++            }
++            // Reef end - configurable goal check intervals
+             List<? extends Animal> entitiesOfClass = this.animal
+                 .level()
+                 .getEntitiesOfClass((Class<? extends Animal>)this.animal.getClass(), this.animal.getBoundingBox().inflate(8.0, 4.0, 8.0));
+diff --git a/net/minecraft/world/entity/ai/goal/TemptGoal.java b/net/minecraft/world/entity/ai/goal/TemptGoal.java
+index 18030dc04eb7d7971e457637b5320b1e41665658..3adbef1f8a98c1fe6bf8ea09381d65d0bb178a0e 100644
+--- a/net/minecraft/world/entity/ai/goal/TemptGoal.java
++++ b/net/minecraft/world/entity/ai/goal/TemptGoal.java
+@@ -48,12 +48,27 @@ public class TemptGoal extends Goal {
+         this.targetingConditions = TEMPT_TARGETING.copy().selector((entity, level) -> this.shouldFollow(entity));
+     }
+ 
++    private int reefCheckCooldown = -1; // Reef - configurable goal check intervals
++
+     @Override
+     public boolean canUse() {
+         if (this.calmDown > 0) {
+             this.calmDown--;
+             return false;
+         } else {
++            // Reef start - configurable goal check intervals
++            final int checkCalls = dev.reef.ReefConfig.goalCheckCalls(dev.reef.ReefConfig.temptationCheckInterval);
++            if (checkCalls > 1) {
++                if (this.reefCheckCooldown < 0) {
++                    this.reefCheckCooldown = this.mob.getRandom().nextInt(checkCalls); // spread checks out between mobs
++                }
++                if (this.reefCheckCooldown > 0) {
++                    this.reefCheckCooldown--;
++                    return false;
++                }
++                this.reefCheckCooldown = checkCalls - 1;
++            }
++            // Reef end - configurable goal check intervals
+             this.player = getServerLevel(this.mob)
+                 .getNearestPlayer(this.targetingConditions.range(this.mob.getAttributeValue(Attributes.TEMPT_RANGE)), this.mob);
+             // CraftBukkit start

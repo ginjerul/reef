@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Sat, 24 Oct 2026 18:50:00 +0300
+Subject: [PATCH] Only players push entities
+
+Based on Leaf's "Only player pushable" by Dreeam.
+
+When optimizations.only-players-push-entities is enabled in reef.yml,
+mobs stop looking for other mobs to collide with. Players still push
+and get pushed by mobs as normal.
+
+Entity collision lookups are one of the biggest costs in crowded animal
+pens, so this can save a lot of tick time on farm-heavy servers.
+
+Changes vanilla behaviour (off by default): mobs can overlap each other,
+and entity cramming damage (maxEntityCramming) no longer applies between
+mobs, so cramming-based kill farms stop working.
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 7896790cd477f032b64e4fc50fe116f32eb2d581..36bd165520f0038012d069bd520bcad58bd5ba8d 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -3825,6 +3825,29 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     protected void serverAiStep() {
+     }
+ 
++    // Reef start - only players push entities
++    // Based on Leaf's "Only player pushable". Only collects players, using Moonrise's per-chunk player map.
++    private List<Entity> getNearbyPushablePlayers() {
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players =
++            ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this.level()).moonrise$getNearbyPlayers()
++                .getPlayers(this.blockPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE);
++        if (players == null || players.size() == 0) {
++            return new java.util.ArrayList<>();
++        }
++        final AABB box = this.getBoundingBox();
++        final java.util.function.Predicate<Entity> conditions = EntitySelector.pushableBy(this);
++        final List<Entity> result = new java.util.ArrayList<>();
++        final ServerPlayer[] raw = players.getRawDataUnchecked();
++        for (int i = 0, len = players.size(); i < len; ++i) {
++            final ServerPlayer player = raw[i];
++            if (player != this && box.intersects(player.getBoundingBox()) && conditions.test(player)) {
++                result.add(player);
++            }
++        }
++        return result;
++    }
++    // Reef end - only players push entities
++
+     protected void pushEntities() {
+         // Paper start - don't run getEntities if we're not going to use its result
+         if (!this.isPushable()) {
+@@ -3841,7 +3864,11 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             return;
+         }
+         // Paper end - don't run getEntities if we're not going to use its result
+-        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
++        // Reef start - only players push entities
++        final List<Entity> pushableEntities = dev.reef.ReefConfig.onlyPlayersPushEntities && !(this instanceof Player)
++            ? this.getNearbyPushablePlayers()
++            : this.level().getPushableEntities(this, this.getBoundingBox());
++        // Reef end - only players push entities
+         if (!pushableEntities.isEmpty()) {
+             if (this.level() instanceof ServerLevel serverLevel) {
+                 // Paper - don't run getEntities if we're not going to use its result; moved up

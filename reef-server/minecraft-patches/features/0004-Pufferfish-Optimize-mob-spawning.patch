@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kevin Raneri <kevin.raneri@gmail.com>
+Date: Wed, 10 Nov 2021 00:37:03 -0500
+Subject: [PATCH] Pufferfish: Optimize mob spawning
+
+License: GPL-3.0-only (https://www.gnu.org/licenses/gpl-3.0.html)
+Original patch from Pufferfish (https://github.com/pufferfish-gg/Pufferfish).
+Co-authored-by: booky10 <boooky10@gmail.com>
+Ported to Reef 1.21.11 with reference to Leaf's version.
+
+Counting all entities for the natural spawning mob caps is moved off the
+main thread. Each tick, spawning uses the result of the previous count,
+then a new count is started on the "Reef Async Mob Spawning" thread.
+If a count hasn't finished by the next tick, natural spawning is skipped
+for that tick instead of using half-written mob counts.
+
+Side effects are limited to slightly more or fewer mobs spawning in a
+given tick. Toggle with optimizations.async-mob-spawning in reef.yml.
+
+Differences from Leaf's port: per-player mob counts are only reset by
+the async job itself (not every tick on the main thread), so a slow
+count can't race with a reset and cause over-spawning; the per-player
+backoff still decays on the main thread every tick.
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index af67b07722bb0125acd081dab767d7e7b360623b..399231bc0af563d626c2a42bb719931c85c6c015 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -183,6 +183,42 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     }
+     // Paper end - chunk tick iteration optimisations
+ 
++    // Reef start - Pufferfish - Optimize mob spawning
++    // true when no async count is running and lastSpawnState is safe to use on the main thread
++    private final java.util.concurrent.atomic.AtomicBoolean spawnStateReady = new java.util.concurrent.atomic.AtomicBoolean(true);
++
++    private NaturalSpawner.SpawnState createSpawnState(final int naturalSpawnChunkCount, final Iterable<Entity> entities, final List<ServerPlayer> players) {
++        if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) {
++            for (final ServerPlayer player : players) {
++                java.util.Arrays.fill(player.mobCounts, 0);
++            }
++            return NaturalSpawner.createState(naturalSpawnChunkCount, entities, this::getFullChunk, null, true);
++        }
++        return NaturalSpawner.createState(naturalSpawnChunkCount, entities, this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++    }
++
++    private void submitAsyncSpawnCount(final int naturalSpawnChunkCount) {
++        if (!this.spawnStateReady.compareAndSet(true, false)) {
++            return; // previous count still running
++        }
++        final List<ServerPlayer> players = List.copyOf(this.level.players);
++        dev.reef.Reef.MOB_SPAWN_EXECUTOR.submit(() -> {
++            try {
++                final ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet.Iterator<Entity> iterator =
++                    this.level.entityTickList.entities.iterator(ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet.ITERATOR_FLAG_SEE_ADDITIONS);
++                try {
++                    this.lastSpawnState = this.createSpawnState(naturalSpawnChunkCount, new dev.reef.util.IterableWrapper<>(iterator), players);
++                } finally {
++                    iterator.finishedIterating();
++                }
++            } catch (final Throwable throwable) {
++                LOGGER.error("Reef: async mob spawn count failed for {}", this.level.getWorld().getName(), throwable);
++            } finally {
++                this.spawnStateReady.set(true);
++            }
++        });
++    }
++    // Reef end - Pufferfish - Optimize mob spawning
+ 
+     public ServerChunkCache(
+         ServerLevel level,
+@@ -531,7 +567,27 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         profiler.push("naturalSpawnCount");
+         int naturalSpawnChunkCount = this.distanceManager.getNaturalSpawnChunkCount();
+         // Paper start - Optional per player mob spawns
+-        NaturalSpawner.SpawnState spawnState;
++        NaturalSpawner.@Nullable SpawnState spawnState; // Reef - Pufferfish - Optimize mob spawning - nullable while an async count is running
++        // Reef start - Pufferfish - Optimize mob spawning
++        final boolean asyncMobSpawning = dev.reef.Reef.asyncMobSpawning();
++        if (asyncMobSpawning) {
++            if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) {
++                // Paper start - per player mob spawning backoff (stays on the main thread)
++                for (ServerPlayer player : this.level.players) {
++                    for (int ii = 0; ii < ServerPlayer.MOBCATEGORY_TOTAL_ENUMS; ii++) {
++                        player.mobBackoffCounts[ii] = Math.max(0, player.mobBackoffCounts[ii] - 1);
++                    }
++                }
++                // Paper end - per player mob spawning backoff
++            }
++            if (this.lastSpawnState == null) {
++                // first tick: count synchronously so spawning can start right away
++                this.lastSpawnState = this.createSpawnState(naturalSpawnChunkCount, this.level.getAllEntities(), this.level.players);
++            }
++            // only use the previous count if no async count is currently writing to the mob counts
++            spawnState = this.spawnStateReady.get() ? this.lastSpawnState : null;
++        } else
++        // Reef end - Pufferfish - Optimize mob spawning
+         if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
+             // re-set mob counts
+             for (ServerPlayer player : this.level.players) {
+@@ -552,11 +608,11 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
+         }
+         // Paper end - Optional per player mob spawns
+-        this.lastSpawnState = spawnState;
++        if (!asyncMobSpawning) this.lastSpawnState = spawnState; // Reef - Pufferfish - Optimize mob spawning - managed asynchronously
+         boolean flag = this.level.getGameRules().get(GameRules.SPAWN_MOBS) && !this.level.players().isEmpty(); // CraftBukkit
+         int i = this.level.getGameRules().get(GameRules.RANDOM_TICK_SPEED);
+         List<MobCategory> filteredSpawningCategories;
+-        if (flag && (this.spawnEnemies || this.spawnFriendlies)) { // Paper
++        if (flag && (this.spawnEnemies || this.spawnFriendlies) && spawnState != null) { // Paper // Reef - Pufferfish - Optimize mob spawning - skip spawning while counting
+             // Paper start - PlayerNaturallySpawnCreaturesEvent
+             for (ServerPlayer entityPlayer : this.level.players()) {
+                 int chunkRange = Math.min(level.spigotConfig.mobSpawnRange, entityPlayer.getBukkitEntity().getViewDistance());
+@@ -589,6 +645,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         } finally {
+             list.clear();
+         }
++        if (asyncMobSpawning) this.submitAsyncSpawnCount(naturalSpawnChunkCount); // Reef - Pufferfish - Optimize mob spawning - count for the next tick
+ 
+         profiler.popPush("tickTickingChunks");
+         this.iterateTickingChunksFaster(); // Paper - chunk tick iteration optimizations
+@@ -600,14 +657,14 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         profiler.pop();
+     }
+ 
+-    private void tickSpawningChunk(LevelChunk chunk, long timeInhabited, List<MobCategory> spawnCategories, NaturalSpawner.SpawnState spawnState) {
++    private void tickSpawningChunk(LevelChunk chunk, long timeInhabited, List<MobCategory> spawnCategories, NaturalSpawner.@Nullable SpawnState spawnState) { // Reef - Pufferfish - Optimize mob spawning - nullable
+         ChunkPos pos = chunk.getPos();
+         chunk.incrementInhabitedTime(timeInhabited);
+         if (true) { // Paper - rewrite chunk system
+             this.level.tickThunder(chunk);
+         }
+ 
+-        if (!spawnCategories.isEmpty()) {
++        if (!spawnCategories.isEmpty() && spawnState != null) { // Reef - Pufferfish - Optimize mob spawning
+             if (this.level.getWorldBorder().isWithinBounds(pos)) { // Paper - rewrite chunk system
+                 NaturalSpawner.spawnForChunk(this.level, chunk, spawnState, spawnCategories);
+             }
+diff --git a/net/minecraft/world/level/entity/EntityTickList.java b/net/minecraft/world/level/entity/EntityTickList.java
+index 79a34ce6c888a611115719412d9a9bbcc0be498a..d5fd8f3cb89acb5637e64aa4dc61dd3e73ddc07d 100644
+--- a/net/minecraft/world/level/entity/EntityTickList.java
++++ b/net/minecraft/world/level/entity/EntityTickList.java
+@@ -9,7 +9,7 @@ import net.minecraft.world.entity.Entity;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class EntityTickList {
+-    private final ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet<net.minecraft.world.entity.Entity> entities = new ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet<>(); // Paper - rewrite chunk system
++    public final ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet<net.minecraft.world.entity.Entity> entities = new ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet<>(); // Paper - rewrite chunk system // Reef - Pufferfish - Optimize mob spawning - private -> public
+ 
+     private void ensureActiveIsNotIterated() {
+         // Paper - rewrite chunk system
