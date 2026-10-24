@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kevin Raneri <kevin.raneri@gmail.com>
+Date: Wed, 10 Nov 2021 00:00:00 +0000
+Subject: [PATCH] Pufferfish: Optimize suffocation
+
+License: GPL-3.0-only (https://www.gnu.org/licenses/gpl-3.0.html)
+Original patch from Pufferfish (https://github.com/pufferfish-gg/Pufferfish).
+Ported to 1.21.11 with reference to Gale's "Reduce in wall checks".
+
+The isInWall check to determine suffocation is quite expensive, and
+often is completely unnecessary to check. We do two things here to
+improve this:
+
+1. We only check for suffocation once every N ticks (configurable in
+reef.yml, default 10). Because of the no-damage ticks after being hurt,
+this is extremely difficult for players to notice.
+
+2. We additionally check whether the entity can even take damage right
+now. This is much cheaper than the suffocation check itself.
+
+Setting optimizations.check-stuck-in-wall-interval to 1 restores
+vanilla behaviour.
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -440,7 +440,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         profilerFiller.push("livingEntityBaseTick");
+         if (this.isAlive() && this.level() instanceof ServerLevel serverLevel1) {
+             boolean flag = this instanceof Player;
+-            if (this.isInWall()) {
++            // Reef start - Pufferfish - Optimize suffocation
++            final int checkStuckInWallInterval = dev.reef.ReefConfig.checkStuckInWallInterval;
++            if ((checkStuckInWallInterval <= 1 || (this.tickCount % checkStuckInWallInterval == 0 && this.couldPossiblyBeHurt(1.0F))) && this.isInWall()) {
++                // Reef end - Pufferfish - Optimize suffocation
+                 this.hurtServer(serverLevel1, this.damageSources().inWall(), 1.0F);
+             } else if (flag && !serverLevel1.getWorldBorder().isWithinBounds(this.getBoundingBox())) {
+                 double d = serverLevel1.getWorldBorder().getDistanceToBorder(this) + serverLevel1.getWorldBorder().getSafeZone();
+@@ -1150,6 +1153,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         return this.getHealth() <= 0.0F;
+     }
+
++    // Reef start - Pufferfish - Optimize suffocation
++    private boolean couldPossiblyBeHurt(float amount) {
++        return !((float) this.invulnerableTime > (float) this.invulnerableDuration / 2.0F) || !(amount <= this.lastHurt);
++    }
++    // Reef end - Pufferfish - Optimize suffocation
++
+     @Override
+     public boolean hurtServer(ServerLevel level, DamageSource damageSource, float amount) {
+         if (this.isInvulnerableTo(level, damageSource)) {
