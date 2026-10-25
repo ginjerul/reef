@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Sun, 25 Oct 2026 08:20:00 +0200
+Subject: [PATCH] Reef version information
+
+/version used Paper's update checker, which looks up the build in the
+PaperMC/Paper repository and always reported "Unknown version" for Reef.
+Use Reef's own version fetcher instead.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+index 9323383f7d1226d887fc9219354ac9613204cbc2..9d62ff3fc6db63cc61206953a493bd484531feed 100644
+--- a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
++++ b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+@@ -485,7 +485,7 @@ public final class CraftMagicNumbers implements UnsafeValues {
+ 
+     @Override
+     public com.destroystokyo.paper.util.VersionFetcher getVersionFetcher() {
+-        return new com.destroystokyo.paper.PaperVersionFetcher();
++        return new dev.reef.ReefVersionFetcher(); // Reef - Reef version info instead of Paper's update check
+     }
+ 
+     @Override

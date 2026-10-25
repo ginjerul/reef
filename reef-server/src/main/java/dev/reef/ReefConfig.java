@@ -71,6 +71,13 @@ public final class ReefConfig {
     /** Compress and write player .dat files on a background thread. */
     public static boolean asyncPlayerDataSaving = true;
 
+    // ---- update-checker ----
+
+    /** Compare the running build with the latest commit on GitHub at startup and in /version. */
+    public static boolean updateCheckerEnabled = true;
+    public static String updateCheckerRepository = "gingercoot/reef";
+    public static String updateCheckerBranch = "main";
+
     private static YamlConfiguration config;
 
     private ReefConfig() {
@@ -92,6 +99,17 @@ public final class ReefConfig {
             "Restart the server after editing this file."
         ));
         config.set("config-version", CONFIG_VERSION);
+
+        config.setComments("update-checker", List.of(
+            "Checks GitHub for newer Reef builds at startup and in /version.",
+            "Only works when the repository is public."
+        ));
+        updateCheckerEnabled = getBoolean("update-checker.enabled", updateCheckerEnabled,
+            "Set to false to turn update checks off.");
+        updateCheckerRepository = getString("update-checker.repository", updateCheckerRepository,
+            "GitHub repository to check, as owner/name.");
+        updateCheckerBranch = getString("update-checker.branch", updateCheckerBranch,
+            "Branch that official builds come from.");
 
         checkStuckInWallInterval = Math.max(1, getInt(
             "optimizations.check-stuck-in-wall-interval", checkStuckInWallInterval,
@@ -197,6 +215,14 @@ public final class ReefConfig {
         }
         config.setComments(path, List.of(comments));
         return config.getBoolean(path, def);
+    }
+
+    private static String getString(String path, String def, String... comments) {
+        if (!config.contains(path)) {
+            config.set(path, def);
+        }
+        config.setComments(path, List.of(comments));
+        return config.getString(path, def);
     }
 
     private static List<String> getStringList(String path, List<String> def, String... comments) {

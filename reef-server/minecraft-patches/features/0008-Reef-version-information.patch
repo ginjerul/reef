@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Sun, 25 Oct 2026 08:20:00 +0200
+Subject: [PATCH] Reef version information
+
+Paper's startup update check looks up the running build's git commit in
+the PaperMC/Paper repository. Reef's commits aren't there, so it always
+printed "You are running an unknown version". Print Reef's own build
+information instead. (The /version command is handled by the matching
+paper patch.)
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index cf645159d431fc93e60f8167267be00b11cb7501..9f351cf8faea83558bbacd47042373d2b7ccbdde 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1286,7 +1286,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             // Paper end - Add onboarding message for initial server start
+             // Paper start - Improve outdated version checking
+             if (System.getProperty("paper.disableStartupVersionCheck") == null && io.papermc.paper.configuration.GlobalConfiguration.get().updateChecker.enabled) {
+-                CompletableFuture.runAsync(com.destroystokyo.paper.PaperVersionFetcher::getUpdateStatusStartupMessage, io.papermc.paper.util.MCUtil.ASYNC_EXECUTOR);
++                CompletableFuture.runAsync(dev.reef.ReefVersionFetcher::printStartupMessage, io.papermc.paper.util.MCUtil.ASYNC_EXECUTOR); // Reef - Reef version info instead of Paper's update check
+             }
+             // Paper end - Improve outdated version checking
+ 

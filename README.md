@@ -15,6 +15,10 @@ Reef aims to stay fully compatible with Paper plugins. Optimizations that change
 | Only players push mobs | Leaf | `optimizations.only-players-push-entities` | `false` |
 | Async player data saving | Reef (idea from Nitori / Leaf) | `optimizations.async-player-data-saving` | `true` |
 
+## Update checks
+
+At startup and in `/version`, Reef compares the running build with the latest commit on GitHub (`update-checker` in `reef.yml`, default `gingercoot/reef` / `main`). This only works while the repository is public.
+
 ## Building
 
 Requirements: **Java 21** (e.g. [Temurin 21](https://adoptium.net/)) and **git**.
