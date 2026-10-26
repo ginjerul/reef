@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Mon, 26 Oct 2026 15:45:00 +0200
+Subject: [PATCH] Skip useless entity move packets
+
+Inspired by Purpur's "Dont send useless entity packets" (MIT, by
+William Blake Galbreath).
+
+Minecraft re-sends every tracked entity's position at least once every
+60 ticks, even when it hasn't moved. For an entity standing still the
+packet's encoded movement is zero, so it changes nothing on the client.
+On a server with many idle animals and many players this adds up to a
+lot of wasted packets.
+
+Only position-only packets with zero movement are dropped. Unlike
+Purpur's version, rotation packets are never dropped (their rotation is
+absolute, not a delta, so a value of 0 is a real rotation). On-ground
+changes are unaffected because they always use the full sync packet.
+
+Toggle with optimizations.skip-useless-move-packets in reef.yml.
+
+diff --git a/net/minecraft/server/level/ServerEntity.java b/net/minecraft/server/level/ServerEntity.java
+index 3a817c92147bb78c60238f3ddc1644b721aed7a2..082105daea8ff0ecf44342da9384fcb5ad9e86ef 100644
+--- a/net/minecraft/server/level/ServerEntity.java
++++ b/net/minecraft/server/level/ServerEntity.java
+@@ -195,6 +195,17 @@ public class ServerEntity {
+                     flag4 = true;
+                 }
+ 
++                // Reef start - skip useless entity move packets
++                // Every 60 ticks a position packet is sent even if the entity hasn't moved. If the
++                // encoded movement is zero it changes nothing on the client, so don't send it.
++                // (On-ground changes always go through the full sync packet above.)
++                if (dev.reef.ReefConfig.skipUselessMovePackets
++                    && packet instanceof ClientboundMoveEntityPacket.Pos movePacket
++                    && movePacket.getXa() == 0 && movePacket.getYa() == 0 && movePacket.getZa() == 0) {
++                    packet = null;
++                }
++                // Reef end - skip useless entity move packets
++
+                 if (this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity && ((LivingEntity)this.entity).isFallFlying()) {
+                     Vec3 deltaMovement = this.entity.getDeltaMovement();
+                     double d = deltaMovement.distanceToSqr(this.lastSentMovement);

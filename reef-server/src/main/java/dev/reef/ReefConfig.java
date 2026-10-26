@@ -71,6 +71,11 @@ public final class ReefConfig {
     /** Compress and write player .dat files on a background thread. */
     public static boolean asyncPlayerDataSaving = true;
 
+    // ---- optimizations.skip-useless-move-packets ----
+
+    /** Don't re-send the position of entities that haven't moved. */
+    public static boolean skipUselessMovePackets = true;
+
     // ---- update-checker ----
 
     /** Compare the running build with the latest commit on GitHub at startup and in /version. */
@@ -131,6 +136,12 @@ public final class ReefConfig {
             "Writes player data files on a background thread instead of the main thread.",
             "Removes lag spikes on autosave and when players leave. Does not change gameplay.",
             "Plugins that read player .dat files directly may see the previous save for a moment."
+        );
+
+        skipUselessMovePackets = getBoolean(
+            "optimizations.skip-useless-move-packets", skipUselessMovePackets,
+            "Don't re-send the position of entities that haven't moved (normally sent every 3 seconds).",
+            "Saves bandwidth with many idle animals and players. Does not change gameplay."
         );
 
         final String dab = "optimizations.dynamic-activation-of-brain";

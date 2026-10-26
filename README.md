@@ -14,6 +14,8 @@ Reef aims to stay fully compatible with Paper plugins. Optimizations that change
 | Slower idle animal AI checks (tempt / follow parent) | Reef (idea from Leaf) | `optimizations.goal-check-interval` | `10` / `20` ticks (vanilla = `2`) |
 | Only players push mobs | Leaf | `optimizations.only-players-push-entities` | `false` |
 | Async player data saving | Reef (idea from Nitori / Leaf) | `optimizations.async-player-data-saving` | `true` |
+| Skip useless entity move packets | Reef (idea from Purpur) | `optimizations.skip-useless-move-packets` | `true` |
+| Faster collision candidate filter | Leaf | – | always on |
 
 ## Update checks
 

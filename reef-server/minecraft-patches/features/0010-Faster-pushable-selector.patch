@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Mon, 26 Oct 2026 15:50:00 +0200
+Subject: [PATCH] Faster pushable selector
+
+Based on Leaf's "Optimize pushable selector" by OverwriteMC.
+
+When a mob looks for entities to collide with, each candidate's
+isPushable() was checked twice: once directly and once inside
+canCollideWithBukkit(), which starts with the same check. For living
+entities isPushable() includes the climbing check, so the duplicate
+isn't free. The spectator check is also inlined instead of going
+through a combined predicate.
+
+Same result as before, just less work per collision candidate - which
+adds up in crowded animal pens.
+
+diff --git a/net/minecraft/world/entity/EntitySelector.java b/net/minecraft/world/entity/EntitySelector.java
+index b9ca072041f5fec0010017877a2821cd650023c5..a857c55d5bd2ea1818d238fe83bc81a564b0458d 100644
+--- a/net/minecraft/world/entity/EntitySelector.java
++++ b/net/minecraft/world/entity/EntitySelector.java
+@@ -46,10 +46,11 @@ public final class EntitySelector {
+         Team team = entity.getTeam();
+         Team.CollisionRule collisionRule = team == null ? Team.CollisionRule.ALWAYS : team.getCollisionRule();
+         return (Predicate<Entity>)(collisionRule == Team.CollisionRule.NEVER
+-            ? Predicates.alwaysFalse()
+-            : NO_SPECTATORS.and(
++            ? Predicates.<Entity>alwaysFalse() // Reef - faster pushable selector
++            : (Predicate<Entity>) (
+                 entity1 -> { final Entity pushedEntity = entity1; // Paper - OBFHELPER
+-                    if (!pushedEntity.isPushable() || !pushedEntity.canCollideWithBukkit(entity) || !entity.canCollideWithBukkit(pushedEntity)) { // CraftBukkit - collidable API // Paper - Climbing should not bypass cramming gamerule
++                    // Reef - faster pushable selector - spectator check inlined; isPushable() dropped because canCollideWithBukkit() already checks it
++                    if (entity1.isSpectator() || !pushedEntity.canCollideWithBukkit(entity) || !entity.canCollideWithBukkit(pushedEntity)) { // CraftBukkit - collidable API // Paper - Climbing should not bypass cramming gamerule
+                         return false;
+                     } else if (!entity.level().isClientSide() || entity1 instanceof Player player && player.isLocalPlayer()) {
+                         Team team1 = entity1.getTeam();
