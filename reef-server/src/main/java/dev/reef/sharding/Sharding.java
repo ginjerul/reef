@@ -46,10 +46,55 @@ public final class Sharding {
     private static final Identifier BUNGEE_CHANNEL = Identifier.parse("bungeecord:main");
     private static final int ARRIVAL_GRACE_TICKS = 40;
 
-    /** A rectangle of the sharded world owned by one server. Min is inclusive, max exclusive (block coordinates). */
-    public record Region(String server, int minX, int minZ, int maxX, int maxZ) {
+    /**
+     * An area of the sharded world owned by one server: a polygon (rectangles, circles and curves are
+     * converted to one when loaded). Rectangles keep the old rule: min inclusive, max exclusive.
+     */
+    public static final class Region {
+        private final String server;
+        private final double[] xs;
+        private final double[] zs;
+        private final double minX, minZ, maxX, maxZ;
+        private final boolean rectangle;
+
+        Region(final String server, final double[] xs, final double[] zs, final boolean rectangle) {
+            this.server = server;
+            this.xs = xs;
+            this.zs = zs;
+            this.rectangle = rectangle;
+            double x0 = Double.MAX_VALUE, z0 = Double.MAX_VALUE, x1 = -Double.MAX_VALUE, z1 = -Double.MAX_VALUE;
+            for (int i = 0; i < xs.length; i++) {
+                x0 = Math.min(x0, xs[i]);
+                x1 = Math.max(x1, xs[i]);
+                z0 = Math.min(z0, zs[i]);
+                z1 = Math.max(z1, zs[i]);
+            }
+            this.minX = x0;
+            this.minZ = z0;
+            this.maxX = x1;
+            this.maxZ = z1;
+        }
+
+        public String server() {
+            return this.server;
+        }
+
         boolean contains(final double x, final double z) {
-            return x >= this.minX && x < this.maxX && z >= this.minZ && z < this.maxZ;
+            if (x < this.minX || x >= this.maxX || z < this.minZ || z >= this.maxZ) {
+                return false;
+            }
+            if (this.rectangle) {
+                return true;
+            }
+            // even-odd ray cast
+            boolean inside = false;
+            for (int i = 0, j = this.xs.length - 1; i < this.xs.length; j = i++) {
+                if ((this.zs[i] > z) != (this.zs[j] > z)
+                    && x < (this.xs[j] - this.xs[i]) * (z - this.zs[i]) / (this.zs[j] - this.zs[i]) + this.xs[i]) {
+                    inside = !inside;
+                }
+            }
+            return inside;
         }
     }
 
@@ -104,8 +149,11 @@ public final class Sharding {
             ));
         }
         config.setComments(path + ".regions", List.of(
-            "Which server owns which part of the world. A server can own several rectangles.",
-            "min-x/min-z are inclusive, max-x/max-z are exclusive (block coordinates)."
+            "Which server owns which part of the world. A server can own several areas. Shapes:",
+            "  rectangle: {server, min-x, min-z, max-x, max-z} (min inclusive, max exclusive)",
+            "  polygon:   {server, points: [[x, z], ...]}, add smooth: true for a curve through the points",
+            "  circle:    {server, center-x, center-z, radius} (or radius-x / radius-z for an ellipse)",
+            "Block coordinates. The editor in NodesMap can draw these for you."
         ));
 
         enabled = config.getBoolean(path + ".enabled");
@@ -118,16 +166,7 @@ public final class Sharding {
         final List<Region> parsed = new ArrayList<>();
         for (final Map<?, ?> map : config.getMapList(path + ".regions")) {
             try {
-                final Region region = new Region(
-                    String.valueOf(map.get("server")),
-                    toInt(map.get("min-x")), toInt(map.get("min-z")),
-                    toInt(map.get("max-x")), toInt(map.get("max-z"))
-                );
-                if (region.minX() >= region.maxX() || region.minZ() >= region.maxZ()) {
-                    LOGGER.warning("Ignoring sharding region with min >= max: " + map);
-                    continue;
-                }
-                parsed.add(region);
+                parsed.add(parseRegion(map));
             } catch (final RuntimeException exception) {
                 LOGGER.warning("Ignoring invalid sharding region " + map + ": " + exception.getMessage());
             }
@@ -142,18 +181,89 @@ public final class Sharding {
         }
     }
 
+    /** Rectangle {min-x..max-z}, polygon {points, smooth?} or circle/ellipse {center-x, center-z, radius | radius-x, radius-z}. */
+    static Region parseRegion(final Map<?, ?> map) {
+        final String server = String.valueOf(map.get("server"));
+        if (map.get("points") instanceof List<?> points) {
+            if (points.size() < 3) {
+                throw new IllegalArgumentException("a polygon needs at least 3 points");
+            }
+            double[][] pts = new double[points.size()][2];
+            for (int i = 0; i < pts.length; i++) {
+                final List<?> pair = (List<?>) points.get(i);
+                pts[i][0] = toDouble(pair.get(0));
+                pts[i][1] = toDouble(pair.get(1));
+            }
+            if (Boolean.TRUE.equals(map.get("smooth"))) {
+                pts = smooth(pts);
+            }
+            return fromPoints(server, pts, false);
+        }
+        if (map.containsKey("center-x")) {
+            final double cx = toDouble(map.get("center-x"));
+            final double cz = toDouble(map.get("center-z"));
+            final double rx = toDouble(map.containsKey("radius-x") ? map.get("radius-x") : map.get("radius"));
+            final double rz = toDouble(map.containsKey("radius-z") ? map.get("radius-z") : map.get("radius"));
+            if (!(rx > 0 && rz > 0)) {
+                throw new IllegalArgumentException("radius must be above 0");
+            }
+            final int n = (int) Math.min(1024, Math.max(32, Math.ceil(2 * Math.PI * Math.max(rx, rz) / 8)));
+            final double[][] pts = new double[n][2];
+            for (int i = 0; i < n; i++) {
+                pts[i][0] = cx + rx * Math.cos(2 * Math.PI * i / n);
+                pts[i][1] = cz + rz * Math.sin(2 * Math.PI * i / n);
+            }
+            return fromPoints(server, pts, false);
+        }
+        final double minX = toDouble(map.get("min-x")), minZ = toDouble(map.get("min-z"));
+        final double maxX = toDouble(map.get("max-x")), maxZ = toDouble(map.get("max-z"));
+        if (minX >= maxX || minZ >= maxZ) {
+            throw new IllegalArgumentException("min must be below max");
+        }
+        return new Region(server, new double[] {minX, maxX, maxX, minX}, new double[] {minZ, minZ, maxZ, maxZ}, true);
+    }
+
+    private static Region fromPoints(final String server, final double[][] pts, final boolean rectangle) {
+        final double[] xs = new double[pts.length], zs = new double[pts.length];
+        for (int i = 0; i < pts.length; i++) {
+            xs[i] = pts[i][0];
+            zs[i] = pts[i][1];
+        }
+        return new Region(server, xs, zs, rectangle);
+    }
+
+    /** Closed Catmull-Rom spline through the points (same maths as NodesMap). */
+    private static double[][] smooth(final double[][] p) {
+        final int n = p.length;
+        final List<double[]> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            final double[] p0 = p[(i + n - 1) % n], p1 = p[i], p2 = p[(i + 1) % n], p3 = p[(i + 2) % n];
+            final int steps = (int) Math.min(256, Math.max(4, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 8)));
+            for (int s = 0; s < steps; s++) {
+                final double t = (double) s / steps, t2 = t * t, t3 = t2 * t;
+                final double[] pt = new double[2];
+                for (int k = 0; k < 2; k++) {
+                    pt[k] = 0.5 * (2 * p1[k] + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2
+                        + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3);
+                }
+                out.add(pt);
+            }
+        }
+        return out.toArray(new double[0][]);
+    }
+
+    private static double toDouble(final Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        return Double.parseDouble(String.valueOf(value).trim());
+    }
+
     private static void setDefault(final YamlConfiguration config, final String path, final Object value, final String... comments) {
         if (!config.contains(path)) {
             config.set(path, value);
         }
         config.setComments(path, List.of(comments));
-    }
-
-    private static int toInt(final Object value) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        return Integer.parseInt(String.valueOf(value).trim());
     }
 
     // ------------------------------------------------------------------ lookups
