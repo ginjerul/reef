@@ -24,8 +24,20 @@ public final class Reef {
 
     public static void init() {
         ReefConfig.init();
+        startServices();
+        // same way Spigot registers /restart and friends; the CraftServer exists at this point
+        net.minecraft.server.MinecraftServer.getServer().server.getCommandMap().register("reef", "Reef", new ReefCommand());
+    }
+
+    /** Re-read reef.yml (/reef reload). Every setting is read live, so changes apply immediately. */
+    public static void reload() {
+        ReefConfig.init();
+        startServices();
+    }
+
+    private static void startServices() {
         if (ReefConfig.asyncMobSpawning) {
-            MOB_SPAWN_EXECUTOR.start();
+            MOB_SPAWN_EXECUTOR.startIfNeeded(); // turning it off later just stops it from being used
         }
     }
 

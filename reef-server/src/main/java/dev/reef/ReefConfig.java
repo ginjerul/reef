@@ -88,6 +88,13 @@ public final class ReefConfig {
     private ReefConfig() {
     }
 
+    /** Load reef.yml if it hasn't been loaded yet (some settings are needed before the server's normal startup). */
+    public static synchronized void ensureLoaded() {
+        if (config == null) {
+            init();
+        }
+    }
+
     public static synchronized void init() {
         config = new YamlConfiguration();
         if (FILE.exists()) {
@@ -186,6 +193,8 @@ public final class ReefConfig {
             "Changes vanilla behaviour: mobs can overlap, and cramming damage between mobs stops",
             "(cramming-based mob farms won't work)."
         );
+
+        dev.reef.sharding.Sharding.load(config);
 
         save();
     }

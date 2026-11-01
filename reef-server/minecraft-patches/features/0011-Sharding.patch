@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reef <reef@localhost>
+Date: Sun, 1 Nov 2026 12:00:00 +0200
+Subject: [PATCH] Sharding
+
+Split one world across several Reef servers behind a Velocity proxy.
+The logic lives in dev.reef.sharding.Sharding; this patch adds the hooks:
+
+- ServerPlayer#doTick: check every tick whether the player crossed into
+  another shard's region, and hand them over.
+- PlayerList#remove: clean up handoff state.
+- ServerLevel#mayInteract: players can't change blocks in other shards'
+  regions or within the border protection strip.
+- ServerLevel entity ticking: mobs in other shards' regions are frozen.
+- ServerLevel#tickChunk / ServerChunkCache#tickSpawningChunk: no random
+  ticks or natural spawning in chunks another shard simulates.
+- PlayerDataStorage: optional player data folder shared by all shards;
+  don't save players again after they've been handed off.
+
+Configured in the sharding section of reef.yml. Off by default.
+
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 399231bc0af563d626c2a42bb719931c85c6c015..8572eae8675fba23475ec59aa54ee3cd86d9f37d 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -664,7 +664,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             this.level.tickThunder(chunk);
+         }
+ 
+-        if (!spawnCategories.isEmpty() && spawnState != null) { // Reef - Pufferfish - Optimize mob spawning
++        if (!spawnCategories.isEmpty() && spawnState != null && dev.reef.sharding.Sharding.ownsChunk(this.level, pos)) { // Reef - Pufferfish - Optimize mob spawning // Reef - sharding
+             if (this.level.getWorldBorder().isWithinBounds(pos)) { // Paper - rewrite chunk system
+                 NaturalSpawner.spawnForChunk(this.level, chunk, spawnState, spawnCategories);
+             }
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index bca8278e526205fb77fcd3e072973b66566927e6..382ffc11b54b45e3bfe59d2ef86bff4bc803289b 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -837,7 +837,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+                     entity -> {
+                         entity.activatedPriorityReset = false; // Reef - Pufferfish - Dynamic Activation of Brain
+                         if (!entity.isRemoved()) {
+-                            if (!tickRateManager.isEntityFrozen(entity)) {
++                            if (!tickRateManager.isEntityFrozen(entity) && dev.reef.sharding.Sharding.shouldTickEntity(this, entity)) { // Reef - sharding - mobs in other shards' regions are frozen here
+                                 profilerFiller.push("checkDespawn");
+                                 entity.checkDespawn();
+                                 profilerFiller.pop();
+@@ -973,6 +973,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     // Paper end - optimise random ticking
+ 
+     public void tickChunk(LevelChunk chunk, int randomTickSpeed) {
++        if (!dev.reef.sharding.Sharding.ownsChunk(this, chunk.getPos())) return; // Reef - sharding - another shard simulates this chunk
+         final ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom simpleRandom = this.simpleRandom; // Paper - optimise random ticking
+         ChunkPos pos = chunk.getPos();
+         int minBlockX = pos.getMinBlockX();
+@@ -1414,7 +1415,8 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+ 
+     @Override
+     public boolean mayInteract(Entity entity, BlockPos pos) {
+-        return !(entity instanceof Player player && (this.server.isUnderSpawnProtection(this, pos, player) || !this.getWorldBorder().isWithinBounds(pos)));
++        return !(entity instanceof Player player && (this.server.isUnderSpawnProtection(this, pos, player) || !this.getWorldBorder().isWithinBounds(pos)))
++            && dev.reef.sharding.Sharding.mayModify(this, entity, pos); // Reef - sharding - no changes in other shards' regions or near borders
+     }
+ 
+     // Paper start - Incremental chunk and player saving
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 79c804245c7f41a5a7f062e1c5e01760adde7d84..6ba61618bd79b4062a9f6b61a7bbdddf5dac6c7b 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -798,6 +798,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         try {
+             if (valid && !this.isSpectator() || !this.touchingUnloadedChunk()) { // Paper - don't tick dead players that are not in the world currently (pending respawn)
+                 super.tick();
++                dev.reef.sharding.Sharding.tickPlayer(this); // Reef - sharding - hand the player to another shard when they cross a border
+                 if (!this.containerMenu.stillValid(this)) {
+                     this.closeContainer(org.bukkit.event.inventory.InventoryCloseEvent.Reason.CANT_USE); // Paper - Inventory close reason
+                     this.containerMenu = this.inventoryMenu;
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 989ac565c47a70c7947cb7315d0f5c2cfecd0363..84424ea0aa0790c172d69fa25cc03c8c079b392a 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -497,6 +497,7 @@ public abstract class PlayerList {
+         player.retireScheduler(); // Paper - Folia schedulers
+         player.getAdvancements().stopListening();
+         this.players.remove(player);
++        dev.reef.sharding.Sharding.onPlayerRemoved(player); // Reef - sharding
+         this.playersByName.remove(player.getScoreboardName().toLowerCase(java.util.Locale.ROOT)); // Spigot
+         this.server.getCustomBossEvents().onPlayerDisconnect(player);
+         UUID uuid = player.getUUID();
+diff --git a/net/minecraft/world/level/storage/PlayerDataStorage.java b/net/minecraft/world/level/storage/PlayerDataStorage.java
+index d5e715ce0e50f814e90d4630682c302146c14afc..be4b9d02213b5cc4b46cced040130a1d7fdb512f 100644
+--- a/net/minecraft/world/level/storage/PlayerDataStorage.java
++++ b/net/minecraft/world/level/storage/PlayerDataStorage.java
+@@ -26,12 +26,13 @@ public class PlayerDataStorage {
+ 
+     public PlayerDataStorage(LevelStorageSource.LevelStorageAccess levelStorageAccess, DataFixer fixerUpper) {
+         this.fixerUpper = fixerUpper;
+-        this.playerDir = levelStorageAccess.getLevelPath(LevelResource.PLAYER_DATA_DIR).toFile();
++        this.playerDir = dev.reef.sharding.Sharding.playerDataFolder(levelStorageAccess.getLevelPath(LevelResource.PLAYER_DATA_DIR).toFile()); // Reef - sharding - player data shared by all shards
+         this.playerDir.mkdirs();
+     }
+ 
+     public void save(Player player) {
+         if (org.spigotmc.SpigotConfig.disablePlayerDataSaving) return; // Spigot
++        if (dev.reef.sharding.Sharding.skipSave(player.getUUID())) return; // Reef - sharding - already saved for the shard they're moving to
+         try (ProblemReporter.ScopedCollector scopedCollector = new ProblemReporter.ScopedCollector(player.problemPath(), LOGGER)) {
+             TagValueOutput tagValueOutput = TagValueOutput.createWithContext(scopedCollector, player.registryAccess());
+             player.saveWithoutId(tagValueOutput);
+@@ -78,6 +79,10 @@ public class PlayerDataStorage {
+     }
+ 
+     // A player who quits and rejoins quickly must load the data that is still being written.
++    public void awaitPendingSave(final java.util.UUID uuid, final String name) { // Reef - sharding - public, used for handoffs
++        this.waitForPendingSave(uuid, name);
++    }
++
+     private void waitForPendingSave(final java.util.UUID uuid, final String name) {
+         final java.util.concurrent.CompletableFuture<Void> future = this.pendingSaves.get(uuid);
+         if (future == null) {

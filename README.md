@@ -17,6 +17,17 @@ Reef aims to stay fully compatible with Paper plugins. Optimizations that change
 | Skip useless entity move packets | Reef (idea from Purpur) | `optimizations.skip-useless-move-packets` | `true` |
 | Faster collision candidate filter | Leaf | – | always on |
 
+## Sharding (experimental)
+
+Reef can split one world across several servers behind Velocity. Players are handed to the right server when they cross a border. See [SHARDING.md](SHARDING.md) for setup and limitations. It's off by default.
+
+## Commands
+
+- `/reef` – show which optimizations are on and their current values
+- `/reef reload` – re-read `reef.yml` without restarting; every setting applies right away
+
+Both need operator or the `reef.command` permission.
+
 ## Update checks
 
 At startup and in `/version`, Reef compares the running build with the latest commit on GitHub (`update-checker` in `reef.yml`, default `gingercoot/reef` / `main`). This only works while the repository is public.

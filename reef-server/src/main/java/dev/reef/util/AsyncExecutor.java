@@ -30,6 +30,13 @@ public final class AsyncExecutor implements Runnable {
         this.thread.start();
     }
 
+    /** Start the thread unless it was already started (a thread can only be started once). */
+    public synchronized void startIfNeeded() {
+        if (this.thread.getState() == Thread.State.NEW) {
+            this.thread.start();
+        }
+    }
+
     public boolean isRunning() {
         return this.thread.isAlive() && !this.killswitch;
     }
