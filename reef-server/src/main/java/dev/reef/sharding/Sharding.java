@@ -153,7 +153,7 @@ public final class Sharding {
             "  rectangle: {server, min-x, min-z, max-x, max-z} (min inclusive, max exclusive)",
             "  polygon:   {server, points: [[x, z], ...]}, add smooth: true for a curve through the points",
             "  circle:    {server, center-x, center-z, radius} (or radius-x / radius-z for an ellipse)",
-            "Block coordinates. The editor in NodesMap can draw these for you."
+            "Block coordinates. The editor in GinjerMap can draw these for you."
         ));
 
         enabled = config.getBoolean(path + ".enabled");
@@ -232,7 +232,7 @@ public final class Sharding {
         return new Region(server, xs, zs, rectangle);
     }
 
-    /** Closed Catmull-Rom spline through the points (same maths as NodesMap). */
+    /** Closed Catmull-Rom spline through the points (same maths as GinjerMap). */
     private static double[][] smooth(final double[][] p) {
         final int n = p.length;
         final List<double[]> out = new ArrayList<>();

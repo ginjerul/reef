@@ -30,7 +30,7 @@ Both need operator or the `reef.command` permission.
 
 ## Update checks
 
-At startup and in `/version`, Reef compares the running build with the latest commit on GitHub (`update-checker` in `reef.yml`, default `gingercoot/reef` / `main`). This only works while the repository is public.
+At startup and in `/version`, Reef compares the running build with the latest commit on GitHub (`update-checker` in `reef.yml`, default `ginjerul/reef` / `main`). This only works while the repository is public.
 
 ## Building
 

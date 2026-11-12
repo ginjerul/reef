@@ -80,7 +80,7 @@ public final class ReefConfig {
 
     /** Compare the running build with the latest commit on GitHub at startup and in /version. */
     public static boolean updateCheckerEnabled = true;
-    public static String updateCheckerRepository = "gingercoot/reef";
+    public static String updateCheckerRepository = "ginjerul/reef";
     public static String updateCheckerBranch = "main";
 
     private static YamlConfiguration config;

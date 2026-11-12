@@ -40,7 +40,7 @@ sharding:
   - **Rectangle:** `{server: a, min-x: .., min-z: .., max-x: .., max-z: ..}` (min inclusive, max exclusive).
   - **Polygon:** `{server: a, points: [[x, z], [x, z], [x, z], ...]}`, at least 3 points. Add `smooth: true` for a curve through the points.
   - **Circle or ellipse:** `{server: a, center-x: .., center-z: .., radius: ..}`, or `radius-x` and `radius-z` for an ellipse.
-- The map editor in NodesMap can draw these shapes and copy the `regions` list for you.
+- The map editor in GinjerMap can draw these shapes and copy the `regions` list for you.
 - If areas overlap, the first one in the list wins.
 - Keep region edges on multiples of 16 where you can. Chunks belong to the server whose area contains their centre, so curved borders follow the shape to within a chunk.
 - Any position outside every region is treated as the edge of the world, and players are pushed back.
