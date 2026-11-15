@@ -302,6 +302,23 @@ public final class Sharding {
         return !isSharded(level) || ownedHere(x, z);
     }
 
+    /**
+     * For plugins (no server internals needed): whether this shard simulates the block at x, z in
+     * the world with this name. True for other worlds and when sharding is off.
+     */
+    public static boolean ownsBlock(final String world, final double x, final double z) {
+        return !enabled || !worldName.equals(world) || ownedHere(x, z);
+    }
+
+    /** For plugins: the name of the shard that owns x, z in this world, or null outside every region or when not sharded. */
+    public static String ownerAt(final String world, final double x, final double z) {
+        if (!enabled || !worldName.equals(world)) {
+            return null;
+        }
+        final Region region = regionAt(x, z);
+        return region == null ? null : region.server();
+    }
+
     public static boolean ownsChunk(final Level level, final ChunkPos pos) {
         return !isSharded(level) || ownedHere((pos.x << 4) + 8.5, (pos.z << 4) + 8.5); // chunk centre
     }
