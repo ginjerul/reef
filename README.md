@@ -52,7 +52,11 @@ Then:
 
 The server jar is the `*-paperclip-*-mojmap.jar` file in `reef-server/build/libs/`. Upload it to your server in place of the Paper jar.
 
-Pushing to GitHub also builds the jar automatically. Download it from the **Actions** tab (artifact `reef-1.21.11`).
+Pushing to GitHub also builds the jar automatically. Download it from the **Actions** tab (artifact `reef-1.21.11`). Every push to `main` also publishes the jar as the `dev-main` pre-release, so the newest build always has the same link, no login needed:
+
+```
+https://github.com/ginjerul/reef/releases/download/dev-main/reef.jar
+```
 
 ## Development
 
