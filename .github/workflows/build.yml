@@ -8,6 +8,8 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write # to publish the dev-main release
     # Only run on PRs if the source branch is on someone else's repo
     if: ${{ github.event_name != 'pull_request' || github.repository != github.event.pull_request.head.repo.full_name }}
     runs-on: ubuntu-latest
@@ -33,3 +35,21 @@ jobs:
           name: reef-1.21.11
           path: reef-server/build/libs/*-paperclip-*-mojmap.jar
           if-no-files-found: error
+      # Pushes to main: publish the jar as a rolling pre-release with a fixed download link, so
+      # servers (and the Ginjer Panel egg) can always fetch the newest build without logging in:
+      #   https://github.com/<owner>/<repo>/releases/download/dev-main/reef.jar
+      - name: Publish dev-main release
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JAR=$(ls reef-server/build/libs/*-paperclip-*-mojmap.jar | head -n 1)
+          mkdir -p dist
+          cp "$JAR" dist/reef.jar
+          TAG=dev-main
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" dist/reef.jar \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Dev build: main" \
+            --notes "Newest build of main ($(git rev-parse --short HEAD)). Download: https://github.com/${{ github.repository }}/releases/download/$TAG/reef.jar"
