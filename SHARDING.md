@@ -19,7 +19,7 @@ Use it when one server can't keep up with the number of players. Below roughly 1
 
 1. **Velocity:** add every shard to `[servers]` in `velocity.toml` and keep `bungee-plugin-message-channel = true` (the default). Use modern forwarding as usual.
 2. **World:** copy the **whole** world folder to every shard, **including `uid.dat`**. Every copy must have the same world ID, or players will be sent to spawn when they arrive.
-3. **Shared player data:** create one folder that every shard can reach. That's either a folder on the same machine, or a network share if the shards run on different machines.
+3. **Shared player data:** create one folder that every shard can reach. That's either a folder on the same machine, or a network share if the shards run on different machines. When a shard starts, it copies any player files from its own `world/playerdata` into the shared folder that aren't there yet. It never overwrites one, so the shared copy always wins. A server that was split into shards keeps everyone's inventory and position without copying anything by hand.
 4. **reef.yml** on every shard: the `regions` list must be **identical everywhere**. Only `this-server` differs.
 
 ```yaml

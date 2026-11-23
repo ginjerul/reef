@@ -355,7 +355,38 @@ public final class Sharding {
         }
         final File folder = new File(sharedPlayerDataFolder);
         LOGGER.info("Sharding: using shared player data folder " + folder.getAbsolutePath());
+        migratePlayerData(defaultFolder, folder);
         return folder;
+    }
+
+    /**
+     * Copies player files from this world's own playerdata folder into the shared one when the
+     * shared folder doesn't have them yet, so a server that was split into shards keeps everyone's
+     * inventory and position without copying anything by hand. Never overwrites: a file already in
+     * the shared folder is newer than any copy a shard still has.
+     */
+    static int migratePlayerData(final File localFolder, final File sharedFolder) {
+        final File[] files = localFolder.listFiles((dir, name) -> name.endsWith(".dat"));
+        if (files == null || files.length == 0 || localFolder.getAbsoluteFile().equals(sharedFolder.getAbsoluteFile())) {
+            return 0;
+        }
+        sharedFolder.mkdirs();
+        int copied = 0;
+        for (final File file : files) {
+            final java.nio.file.Path target = sharedFolder.toPath().resolve(file.getName());
+            try {
+                java.nio.file.Files.copy(file.toPath(), target); // fails if it exists, so nothing is overwritten
+                copied++;
+            } catch (final java.nio.file.FileAlreadyExistsException ignored) {
+                // the shared copy wins
+            } catch (final java.io.IOException exception) {
+                LOGGER.warning("Sharding: couldn't copy " + file.getName() + " to the shared player data folder: " + exception.getMessage());
+            }
+        }
+        if (copied > 0) {
+            LOGGER.info("Sharding: copied " + copied + " player file(s) from " + localFolder + " into the shared player data folder");
+        }
+        return copied;
     }
 
     /** Players being moved to another shard aren't saved again here (their data is already saved, and the other shard owns it now). */
