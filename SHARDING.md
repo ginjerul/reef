@@ -48,6 +48,15 @@ sharding:
 
 `/reef` shows whether sharding is on, which server this is, and how many handoffs are in progress.
 
+## For plugin developers
+
+Plugins can ask which shard simulates a position, without touching server internals (call them by reflection if your plugin also runs on plain Paper):
+
+- `dev.reef.sharding.Sharding.ownsBlock(String world, double x, double z)`: true if this shard simulates that spot (also true for worlds that are not sharded, and when sharding is off).
+- `dev.reef.sharding.Sharding.ownerAt(String world, double x, double z)`: the owning shard's name, or null.
+
+Use it to run block-bound features (machines, timed spawns) only on the shard that owns the block.
+
 ## Limitations
 
 - **Plugin data isn't shared.** Plugins that keep data per server (economy, claims, towns, homes) need their own database-backed cross-server support. LuckPerms with MySQL works, for example.
