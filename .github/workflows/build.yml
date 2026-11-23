@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push replaces a build still running for the same branch, so two builds of main can't
+# race to publish the dev-main release (the older one finishing last would win).
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     permissions:
