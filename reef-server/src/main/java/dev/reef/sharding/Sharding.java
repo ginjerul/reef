@@ -328,6 +328,33 @@ public final class Sharding {
         return strip == 0 || (ownedHere(x + strip, z) && ownedHere(x - strip, z) && ownedHere(x, z + strip) && ownedHere(x, z - strip));
     }
 
+    // ------------------------------------------------------------------ plugin API (used by Nodes and GinjerMap via reflection)
+
+    private static boolean isShardedWorld(final String world) {
+        return enabled && world != null && world.equals(worldName);
+    }
+
+    /**
+     * Whether this server simulates block x, z of the world with this name. Always true when
+     * sharding is off or the world isn't the sharded one. Safe to call from any thread.
+     */
+    public static boolean ownsBlock(final String world, final double x, final double z) {
+        return !isShardedWorld(world) || ownedHere(x, z);
+    }
+
+    /**
+     * The name (as in velocity.toml) of the shard that owns x, z of the world with this name, or
+     * null when sharding is off, the world isn't the sharded one, or x, z is outside every region.
+     * Safe to call from any thread.
+     */
+    public static String ownerAt(final String world, final double x, final double z) {
+        if (!isShardedWorld(world)) {
+            return null;
+        }
+        final Region region = regionAt(x, z);
+        return region == null ? null : region.server();
+    }
+
     // ------------------------------------------------------------------ player data
 
     /** The folder player data is read from and written to. */

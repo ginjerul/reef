@@ -48,6 +48,15 @@ sharding:
 
 `/reef` shows whether sharding is on, which server this is, and how many handoffs are in progress.
 
+## For plugin developers
+
+`dev.reef.sharding.Sharding` has two static methods that plugins can call (through reflection, so they also load on plain Paper). Nodes and GinjerMap use both.
+
+- `ownsBlock(String world, double x, double z)` returns `true` if this shard simulates that spot. It's always `true` when sharding is off or for worlds that aren't sharded.
+- `ownerAt(String world, double x, double z)` returns the name of the shard that owns that spot, as in `velocity.toml`. It returns `null` when sharding is off, for worlds that aren't sharded, or outside every region.
+
+Both can be called from any thread.
+
 ## Limitations
 
 - **Plugin data isn't shared.** Plugins that keep data per server (economy, claims, towns, homes) need their own database-backed cross-server support. LuckPerms with MySQL works, for example.
