@@ -195,6 +195,8 @@ public final class ReefConfig {
         );
 
         dev.reef.sharding.Sharding.load(config);
+        dev.reef.lag.DynamicDistance.load(config);
+        dev.reef.lag.EntityClearer.load(config);
 
         save();
     }

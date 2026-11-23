@@ -16,7 +16,7 @@ public final class ReefCommand extends Command {
     private static final String PERMISSION = "reef.command";
 
     public ReefCommand() {
-        super("reef", "Reef settings and reload", "/reef [info|reload]", List.of());
+        super("reef", "Reef settings, entity cleanup and lag report", "/reef [info|reload|clear <items|arrows|xp|all> [seconds]|entities]", List.of());
         this.setPermission(PERMISSION);
     }
 
@@ -39,6 +39,46 @@ public final class ReefCommand extends Command {
                     java.util.logging.Logger.getLogger("Reef").log(java.util.logging.Level.SEVERE, "Failed to reload reef.yml", exception);
                 }
             }
+            case "clear" -> {
+                final java.util.List<dev.reef.lag.EntityClearer.Kind> kinds = dev.reef.lag.EntityClearer.parseKinds(
+                    args.length > 1 ? java.util.List.of(args[1]) : java.util.List.of("all"));
+                int seconds = 0;
+                if (args.length > 2) {
+                    try {
+                        seconds = Math.max(0, Math.min(600, Integer.parseInt(args[2])));
+                    } catch (final NumberFormatException ignored) {
+                        sender.sendMessage(Component.text("Seconds must be a number.", NamedTextColor.RED));
+                        return true;
+                    }
+                }
+                if (kinds.isEmpty()) {
+                    sender.sendMessage(Component.text("Usage: /reef clear <items|arrows|xp|all> [warning seconds]", NamedTextColor.RED));
+                } else if (seconds == 0) {
+                    final int removed = dev.reef.lag.EntityClearer.clearNow(kinds);
+                    sender.sendMessage(Component.text("Removed " + removed + " " + dev.reef.lag.EntityClearer.describe(kinds) + ".", NamedTextColor.GREEN));
+                } else if (dev.reef.lag.EntityClearer.clearAfter(kinds, seconds)) {
+                    sender.sendMessage(Component.text("Clearing " + dev.reef.lag.EntityClearer.describe(kinds) + " in " + seconds + " seconds; players were warned.", NamedTextColor.GREEN));
+                } else {
+                    sender.sendMessage(Component.text("A clear is already counting down.", NamedTextColor.YELLOW));
+                }
+            }
+            case "entities" -> {
+                try {
+                    final java.util.Map<String, Object> report = dev.reef.lag.EntityReport.scan();
+                    final java.io.File file = dev.reef.lag.EntityReport.write(report);
+                    sender.sendMessage(Component.text("Counted " + report.get("entities") + " entities and " + report.get("block_entities")
+                        + " block entities in " + report.get("loaded_chunks") + " loaded chunks. Worst chunks written to " + file.getName() + ".", NamedTextColor.GREEN));
+                    @SuppressWarnings("unchecked")
+                    final java.util.List<java.util.Map<String, Object>> chunks = (java.util.List<java.util.Map<String, Object>>) report.get("chunks");
+                    for (final java.util.Map<String, Object> chunk : chunks.subList(0, Math.min(5, chunks.size()))) {
+                        sender.sendMessage(Component.text(" - " + chunk.get("world") + " chunk " + chunk.get("x") + ", " + chunk.get("z") + " (block "
+                            + ((int) chunk.get("x") * 16 + 8) + ", " + ((int) chunk.get("z") * 16 + 8) + "): " + chunk.get("entities") + " entities, "
+                            + chunk.get("block_entities") + " block entities", NamedTextColor.GRAY));
+                    }
+                } catch (final java.io.IOException exception) {
+                    sender.sendMessage(Component.text("Couldn't write the report: " + exception.getMessage(), NamedTextColor.RED));
+                }
+            }
             default -> sender.sendMessage(Component.text("Usage: " + this.getUsage(), NamedTextColor.RED));
         }
         return true;
@@ -48,7 +88,11 @@ public final class ReefCommand extends Command {
     public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
         if (args.length == 1) {
             final String typed = args[0].toLowerCase(Locale.ROOT);
-            return List.of("info", "reload").stream().filter(option -> option.startsWith(typed)).toList();
+            return List.of("info", "reload", "clear", "entities").stream().filter(option -> option.startsWith(typed)).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("clear")) {
+            final String typed = args[1].toLowerCase(Locale.ROOT);
+            return List.of("items", "arrows", "xp", "all").stream().filter(option -> option.startsWith(typed)).toList();
         }
         return List.of();
     }
@@ -68,6 +112,8 @@ public final class ReefCommand extends Command {
         line(sender, "Async player data saving", onOff(ReefConfig.asyncPlayerDataSaving), !ReefConfig.asyncPlayerDataSaving);
         line(sender, "Skip useless move packets", onOff(ReefConfig.skipUselessMovePackets), !ReefConfig.skipUselessMovePackets);
         line(sender, "Sharding", dev.reef.sharding.Sharding.describe(), !dev.reef.sharding.Sharding.enabled);
+        line(sender, "Dynamic view distance", dev.reef.lag.DynamicDistance.describe(), !dev.reef.lag.DynamicDistance.enabled);
+        line(sender, "Entity clearer", dev.reef.lag.EntityClearer.status(), false);
         line(sender, "Update checker", ReefConfig.updateCheckerEnabled
             ? "on (" + ReefConfig.updateCheckerRepository + ", " + ReefConfig.updateCheckerBranch + ")"
             : "off", false);

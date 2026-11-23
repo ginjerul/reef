@@ -17,6 +17,19 @@ Reef aims to stay fully compatible with Paper plugins. Optimizations that change
 | Skip useless entity move packets | Reef (idea from Purpur) | `optimizations.skip-useless-move-packets` | `true` |
 | Faster collision candidate filter | Leaf | – | always on |
 
+## Lag tools
+
+Built in, configured in the `lag` section of `reef.yml`:
+
+- **Dynamic view distance** (on by default). When the average tick takes longer than 45 ms, Reef lowers the simulation distance a step, then the view distance, down to 3 and 5 chunks. Once ticks stay under 35 ms for a minute, it raises them again, view first, up to `view-distance` and `simulation-distance` in `server.properties`. `/reef` shows the current values.
+- **Entity clearer.** It removes dropped items, arrows stuck in blocks and experience orbs. Mobs, named items and thrown tridents are never removed.
+  - `/reef clear <items|arrows|xp|all> [seconds]` clears now, after a warning in chat when seconds are given.
+  - Scheduled clearing is off by default.
+  - Per-chunk limits are on by default: 300 items, 100 arrows and 100 orbs. The oldest beyond the limit are removed every 30 seconds, so a broken farm can't build a pile of thousands.
+- **Entity report.** `/reef entities` counts the entities and block entities (hoppers, furnaces, ...) in every loaded chunk. It lists the worst chunks and writes the top 30 to `reef-entities.json`, which the Ginjer Panel's lag hotspots page reads.
+
+On a shard, the clearer only touches the chunks that shard owns.
+
 ## Sharding (experimental)
 
 Reef can split one world across several servers behind Velocity. Players are handed to the right server when they cross a border. See [SHARDING.md](SHARDING.md) for setup and limitations. It's off by default.
@@ -25,6 +38,8 @@ Reef can split one world across several servers behind Velocity. Players are han
 
 - `/reef` – show which optimizations are on and their current values
 - `/reef reload` – re-read `reef.yml` without restarting; every setting applies right away
+- `/reef clear <items|arrows|xp|all> [seconds]` – clear ground items, stuck arrows and experience orbs, after a warning
+- `/reef entities` – find the chunks with the most entities and block entities
 
 Both need operator or the `reef.command` permission.
 

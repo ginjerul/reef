@@ -19,12 +19,22 @@ public final class Reef {
         return thread;
     });
 
+    private static boolean tickerAdded = false;
+
     private Reef() {
     }
 
     public static void init() {
         ReefConfig.init();
         startServices();
+        if (!tickerAdded) {
+            tickerAdded = true;
+            // runs every server tick on the main thread
+            net.minecraft.server.MinecraftServer.getServer().addTickable(() -> {
+                dev.reef.lag.DynamicDistance.tick();
+                dev.reef.lag.EntityClearer.tick();
+            });
+        }
         // same way Spigot registers /restart and friends; the CraftServer exists at this point
         net.minecraft.server.MinecraftServer.getServer().server.getCommandMap().register("reef", "Reef", new ReefCommand());
     }
